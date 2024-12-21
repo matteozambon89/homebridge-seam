@@ -1,5 +1,5 @@
 {
-  "pluginAlias": "ExampleHomebridgePlugin",
+  "pluginAlias": "HomebridgeSEAM",
   "pluginType": "platform",
   "singular": true,
   "strictValidation": false,
@@ -10,8 +10,67 @@
         "title": "Name",
         "type": "string",
         "required": true,
-        "default": "Example Dynamic Platform"
+        "default": "SEAM"
+      },
+      "credentials": {
+        "type": "object",
+        "properties": {
+          "apiKey": {
+            "title": "API Key",
+            "type": "string",
+            "placeholder": "Enter your API Key",
+            "x-schema-form": {
+              "type": "apiKey"
+            }
+          },
+          "workspaceId": {
+            "title": "Workspace ID",
+            "type": "string",
+            "placeholder": "Enter your Workspace ID",
+            "x-schema-form": {
+              "type": "uuid"
+            }
+          }
+        },
+        "required": ["apiKey", "workspaceId"]
+      },
+      "options": {
+        "type": "object",
+        "properties": {
+          "devices": {
+            "type": "array",
+            "items": {
+              "title": "Devices",
+              "type": "object",
+              "properties": {
+                "deviceId": {
+                  "type": "string",
+                  "title": "Device ID",
+                  "placeholder": "e7f5f5f5-5f5f-5f5f-5f5f-5f5f5f5f5f5f"
+                },
+                "deviceType": {
+                  "type": "string",
+                  "title": "Device Type",
+                  "placeholder": "Lock",
+                  "enum": ["Lock"],
+                  "x-schema-form": {
+                    "type": "select"
+                  }
+                }
+              },
+              "required": ["deviceId"]
+            },
+            "uniqueItems": true
+          },
+          "refreshRate": {
+            "title": "Refresh Rate",
+            "type": "number",
+            "placeholder": 30,
+            "description": "Indicates the number of seconds between polls of SEAM API."
+          }
+        }
       }
-    }
+    },
+    "required": ["name", "credentials"]
   }
 }
