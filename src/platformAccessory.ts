@@ -1,148 +1,304 @@
-import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
+import type { CharacteristicValue, Logging, PlatformAccessory, Service } from 'homebridge';
 
-import type { ExampleHomebridgePlatform } from './platform.js';
+import type { SeamPlatform } from './platform.js';
+import { Device } from 'seam';
+import PQueue from 'p-queue';
 
 /**
  * Platform Accessory
  * An instance of this class is created for each accessory your platform registers
  * Each accessory may expose multiple services of different service types.
  */
-export class ExamplePlatformAccessory {
-  private service: Service;
+export class LockAccessory {
+  private lockService: Service;
+  private batteryService: Service;
+
+  private log: Logging;
+
+  private device: Device;
+  private lastUpdated: Date;
+
+  private queue: PQueue;
 
   /**
    * These are just used to create a working example
    * You should implement your own code to track the state of your accessory
    */
-  private exampleStates = {
-    On: false,
-    Brightness: 100,
+  private states: {
+    StatusLowBattery: number;
+    BatteryLevel: number;
+    LockCurrentState: number;
+    LockTargetState: number;
+    ContactSensorState: number;
   };
 
-  constructor(
-    private readonly platform: ExampleHomebridgePlatform,
-    private readonly accessory: PlatformAccessory,
-  ) {
+  constructor(private readonly platform: SeamPlatform, private readonly accessory: PlatformAccessory) {
+    this.log = this.platform.log;
+    this.device = this.accessory.context.device;
+    this.lastUpdated = new Date();
+
+    this.queue = new PQueue({ concurrency: 1 });
+
+    this.states = {
+      StatusLowBattery: this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
+      BatteryLevel: 100,
+      LockCurrentState: this.platform.Characteristic.LockCurrentState.SECURED,
+      LockTargetState: this.platform.Characteristic.LockTargetState.SECURED,
+      ContactSensorState: this.platform.Characteristic.ContactSensorState.CONTACT_DETECTED,
+    };
+
     // set accessory information
-    this.accessory.getService(this.platform.Service.AccessoryInformation)!
-      .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Default-Manufacturer')
-      .setCharacteristic(this.platform.Characteristic.Model, 'Default-Model')
-      .setCharacteristic(this.platform.Characteristic.SerialNumber, 'Default-Serial');
+    this.accessory
+      .getService(this.platform.Service.AccessoryInformation)!
+      .setCharacteristic(
+        this.platform.Characteristic.Manufacturer,
+        this.device.properties.model.manufacturer_display_name || 'Default-Manufacturer',
+      )
+      .setCharacteristic(
+        this.platform.Characteristic.Model,
+        this.device.properties.model.display_name || 'Default-Model',
+      )
+      .setCharacteristic(
+        this.platform.Characteristic.SerialNumber,
+        this.device.properties.serial_number || 'Default-Serial',
+      );
 
-    // get the LightBulb service if it exists, otherwise create a new LightBulb service
-    // you can create multiple services for each accessory
+    this.lockService =
+      this.accessory.getService(this.platform.Service.LockMechanism) ||
+      this.accessory.addService(this.platform.Service.LockMechanism);
 
-    if (accessory.context.device.CustomService) {
-      // This is only required when using Custom Services and Characteristics not support by HomeKit
-      this.service = this.accessory.getService(this.platform.CustomServices[accessory.context.device.CustomService]) ||
-        this.accessory.addService(this.platform.CustomServices[accessory.context.device.CustomService]);
-    } else {
-      this.service = this.accessory.getService(this.platform.Service.Lightbulb) || this.accessory.addService(this.platform.Service.Lightbulb);
+    this.batteryService =
+      this.accessory.getService(this.platform.Service.Battery) ||
+      this.accessory.addService(this.platform.Service.Battery);
+
+    this.lockService.setCharacteristic(this.platform.Characteristic.Name, this.device.display_name);
+
+    if (this.device.properties.battery) {
+      this.batteryService
+        .getCharacteristic(this.platform.Characteristic.StatusLowBattery)
+        .onGet(this.getStatusLowBattery.bind(this));
+      this.batteryService
+        .getCharacteristic(this.platform.Characteristic.BatteryLevel)
+        .onGet(this.getBatteryLevel.bind(this));
     }
 
-    // set the service name, this is what is displayed as the default name on the Home app
-    // in this example we are using the name we stored in the `accessory.context` in the `discoverDevices` method.
-    this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.exampleDisplayName);
+    this.lockService
+      .getCharacteristic(this.platform.Characteristic.ContactSensorState)
+      .onGet(this.getContactSensorState.bind(this));
 
-    // each service must implement at-minimum the "required characteristics" for the given service type
-    // see https://developers.homebridge.io/#/service/Lightbulb
+    this.lockService
+      .getCharacteristic(this.platform.Characteristic.LockCurrentState)
+      .onGet(this.getLockCurrentState.bind(this));
 
-    // register handlers for the On/Off Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(this.setOn.bind(this)) // SET - bind to the `setOn` method below
-      .onGet(this.getOn.bind(this)); // GET - bind to the `getOn` method below
+    this.lockService
+      .getCharacteristic(this.platform.Characteristic.LockTargetState)
+      .onGet(this.getLockTargetState.bind(this))
+      .onSet(this.setLockTargetState.bind(this));
 
-    // register handlers for the Brightness Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.Brightness)
-      .onSet(this.setBrightness.bind(this)); // SET - bind to the `setBrightness` method below
-
-    /**
-     * Creating multiple services of the same type.
-     *
-     * To avoid "Cannot add a Service with the same UUID another Service without also defining a unique 'subtype' property." error,
-     * when creating multiple services of the same type, you need to use the following syntax to specify a name and subtype id:
-     * this.accessory.getService('NAME') || this.accessory.addService(this.platform.Service.Lightbulb, 'NAME', 'USER_DEFINED_SUBTYPE_ID');
-     *
-     * The USER_DEFINED_SUBTYPE must be unique to the platform accessory (if you platform exposes multiple accessories, each accessory
-     * can use the same subtype id.)
-     */
-
-    // Example: add two "motion sensor" services to the accessory
-    const motionSensorOneService = this.accessory.getService('Motion Sensor One Name')
-      || this.accessory.addService(this.platform.Service.MotionSensor, 'Motion Sensor One Name', 'YourUniqueIdentifier-1');
-
-    const motionSensorTwoService = this.accessory.getService('Motion Sensor Two Name')
-      || this.accessory.addService(this.platform.Service.MotionSensor, 'Motion Sensor Two Name', 'YourUniqueIdentifier-2');
-
-    /**
-     * Updating characteristics values asynchronously.
-     *
-     * Example showing how to update the state of a Characteristic asynchronously instead
-     * of using the `on('get')` handlers.
-     * Here we change update the motion sensor trigger states on and off every 10 seconds
-     * the `updateCharacteristic` method.
-     *
-     */
-    let motionDetected = false;
     setInterval(() => {
-      // EXAMPLE - inverse the trigger
-      motionDetected = !motionDetected;
+      if (this.queue.size + this.queue.pending > 0) {
+        this.log.debug(this.device.device_id, 'Skipping update (queue is not empty)');
+        return;
+      }
+      if (this.accessory.context.lastUpdated <= this.lastUpdated) {
+        return;
+      }
 
-      // push the new value to HomeKit
-      motionSensorOneService.updateCharacteristic(this.platform.Characteristic.MotionDetected, motionDetected);
-      motionSensorTwoService.updateCharacteristic(this.platform.Characteristic.MotionDetected, !motionDetected);
+      this.log.debug(
+        this.device.device_id,
+        'Checking for updates',
+        this.accessory.context.lastUpdated,
+        this.lastUpdated,
+      );
 
-      this.platform.log.debug('Triggering motionSensorOneService:', motionDetected);
-      this.platform.log.debug('Triggering motionSensorTwoService:', !motionDetected);
-    }, 10000);
+      this.device = this.accessory.context.device;
+      this.lastUpdated = new Date();
+
+      this.computeAll();
+    }, 1000);
   }
 
-  /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
-   */
-  async setOn(value: CharacteristicValue) {
-    // implement your own code to turn your device on/off
-    this.exampleStates.On = value as boolean;
+  printStateInfo<
+    K extends keyof typeof this.states & keyof (typeof this.platform)['Characteristic'],
+    V extends (typeof this.states)[K],
+  >(state: K, value: V) {
+    const from = Object.entries(this.platform.Characteristic[state]).find(([, v]) => v === this.states[state]) || [
+      this.states[state],
+    ];
+    const to = Object.entries(this.platform.Characteristic[state]).find(([, v]) => v === value) || [value];
 
-    this.platform.log.debug('Set Characteristic On ->', value);
+    this.log.info(this.device.device_id, state, from[0], '->', to[0]);
   }
 
-  /**
-   * Handle the "GET" requests from HomeKit
-   * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
-   *
-   * GET requests should return as fast as possible. A long delay here will result in
-   * HomeKit being unresponsive and a bad user experience in general.
-   *
-   * If your device takes time to respond you should update the status of your device
-   * asynchronously instead using the `updateCharacteristic` method instead.
-   * In this case, you may decide not to implement `onGet` handlers, which may speed up
-   * the responsiveness of your device in the Home app.
+  updateState<
+    K extends keyof typeof this.states & keyof (typeof this.platform)['Characteristic'],
+    V extends (typeof this.states)[K],
+  >(service: 'lock' | 'battery', state: K, value: V) {
+    if (value === this.states[state]) {
+      this.log.debug(this.device.device_id, 'Ignoring update', state, this.states[state], '->', value);
+      return;
+    }
 
-   * @example
-   * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
-   */
-  async getOn(): Promise<CharacteristicValue> {
-    // implement your own code to check if the device is on
-    const isOn = this.exampleStates.On;
+    this.printStateInfo(state, value);
 
-    this.platform.log.debug('Get Characteristic On ->', isOn);
+    this.states[state] = value;
 
-    // if you need to return an error to show the device as "Not Responding" in the Home app:
-    // throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-
-    return isOn;
+    switch (service) {
+      case 'lock':
+        this.lockService.updateCharacteristic(this.platform.Characteristic[state], value);
+        break;
+      case 'battery':
+        this.batteryService.updateCharacteristic(this.platform.Characteristic[state], value);
+        break;
+    }
   }
 
-  /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, changing the Brightness
-   */
-  async setBrightness(value: CharacteristicValue) {
-    // implement your own code to set the brightness
-    this.exampleStates.Brightness = value as number;
+  computeAll() {
+    this.log.debug(this.device.device_id, 'Computing all');
 
-    this.platform.log.debug('Set Characteristic Brightness -> ', value);
+    this.updateState('battery', 'StatusLowBattery', this.computeStatusLowBattery());
+    this.updateState('battery', 'BatteryLevel', this.computeBatteryLevel());
+    this.updateState('lock', 'LockCurrentState', this.computeLockCurrentState());
+    this.updateState('lock', 'LockTargetState', this.computeLockCurrentState());
+    this.updateState('lock', 'ContactSensorState', this.computeContactSensorState());
+  }
+
+  computeStatusLowBattery() {
+    switch (this.device.properties.battery?.status) {
+      case 'full':
+      case 'good':
+      default:
+        this.log.debug(
+          this.device.device_id,
+          'Battery status is',
+          this.device.properties.battery?.status,
+          ', setting StatusLowBattery to BATTERY_LEVEL_NORMAL',
+        );
+        return this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
+      case 'low':
+      case 'critical':
+        this.log.debug(
+          this.device.device_id,
+          'Battery status is',
+          this.device.properties.battery?.status,
+          ', setting StatusLowBattery to BATTERY_LEVEL_LOW',
+        );
+        return this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW;
+    }
+  }
+
+  getStatusLowBattery() {
+    return this.states.StatusLowBattery;
+  }
+
+  computeBatteryLevel() {
+    const batteryLevel = (this.device.properties.battery?.level ?? 1) * 100;
+
+    this.log.debug(
+      this.device.device_id,
+      'Battery level is ',
+      this.device.properties.battery?.level,
+      ', setting BatteryLevel to ',
+      batteryLevel,
+    );
+
+    return batteryLevel;
+  }
+
+  getBatteryLevel() {
+    return this.states.BatteryLevel;
+  }
+
+  computeLockCurrentState() {
+    if (!this.device.properties.online) {
+      this.log.warn(this.device.device_id, 'Device is offline, setting LockCurrentState to UNKNOWN');
+      return this.platform.Characteristic.LockCurrentState.UNKNOWN;
+    }
+
+    switch (this.device.properties.locked) {
+      case undefined:
+        this.log.warn(this.device.device_id, 'Lock state is unknown, setting LockCurrentState to UNKNOWN');
+        return this.platform.Characteristic.LockCurrentState.UNKNOWN;
+      case true:
+        this.log.debug(this.device.device_id, 'Lock state is locked, setting LockCurrentState to SECURED');
+        return this.platform.Characteristic.LockCurrentState.SECURED;
+      case false:
+        this.log.debug(this.device.device_id, 'Lock state is unlocked, setting LockCurrentState to UNSECURED');
+        return this.platform.Characteristic.LockCurrentState.UNSECURED;
+    }
+  }
+
+  getLockCurrentState() {
+    return this.states.LockCurrentState;
+  }
+
+  computeContactSensorState() {
+    switch (this.device.properties.door_open) {
+      case undefined:
+      case true:
+        this.log.debug(this.device.device_id, 'Door is open, setting ContactSensorState to CONTACT_NOT_DETECTED');
+        return this.platform.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED;
+      case false:
+        this.log.debug(this.device.device_id, 'Door is closed, setting ContactSensorState to CONTACT_DETECTED');
+        return this.platform.Characteristic.ContactSensorState.CONTACT_DETECTED;
+    }
+  }
+
+  getContactSensorState() {
+    return this.states.ContactSensorState;
+  }
+
+  getLockTargetState() {
+    return this.states.LockTargetState;
+  }
+
+  async doLockOrUnlock(action: 'lock' | 'unlock') {
+    this.log.info(this.device.device_id, 'Attempt to', action, this.device.device_id);
+
+    await this.platform.client.locks[`${action}Door`]({
+      device_id: this.device.device_id,
+      sync: true,
+    });
+
+    this.log.info(this.device.device_id, 'Complete to', action, this.device.device_id);
+  }
+
+  async setLockTargetState(value: CharacteristicValue) {
+    if (value === this.states.LockTargetState || value === this.states.LockCurrentState) {
+      this.log.debug(this.device.device_id, 'Ignoring setLockTargetState', value, this.states);
+      return;
+    }
+
+    this.updateState('lock', 'LockTargetState', value as number);
+
+    let promise: Promise<unknown> | null = null;
+
+    switch (value) {
+      case this.platform.Characteristic.LockTargetState.SECURED:
+        promise = this.doLockOrUnlock('lock');
+        break;
+      case this.platform.Characteristic.LockTargetState.UNSECURED:
+        promise = this.doLockOrUnlock('unlock');
+        break;
+      default:
+        this.log.error(this.device.device_id, 'Unknown LockTargetState', value);
+        return;
+    }
+
+    this.queue.add(async () => {
+      try {
+        await promise;
+
+        this.updateState('lock', 'LockCurrentState', value as number);
+      } catch (err) {
+        this.log.error(this.device.device_id, 'Failed to lock/unlock', err);
+
+        this.updateState('lock', 'LockCurrentState', this.platform.Characteristic.LockCurrentState.UNKNOWN);
+      }
+    });
+  }
+
+  getServices() {
+    return [this.lockService];
   }
 }
