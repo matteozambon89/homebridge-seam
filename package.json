@@ -1,19 +1,19 @@
 {
-  "name": "homebridge-plugin-name",
-  "displayName": "Plugin Name",
+  "name": "homebridge-seam",
+  "displayName": "Homebridge Seam",
   "type": "module",
   "version": "1.0.0",
   "private": true,
-  "description": "A short description about what your plugin does.",
-  "author": "Your Name",
+  "description": "Homebridge plugin for SEAM",
+  "author": "Matteo Zambon<matteo@yeeti.co>",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/USERNAME/GITHUB_PROJECT_NAME#readme",
+  "homepage": "https://github.com/matteozambon89/homebridge-seam#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/USERNAME/GITHUB_PROJECT_NAME.git"
+    "url": "https://github.com/matteozambon89/homebridge-seam.git"
   },
   "bugs": {
-    "url": "https://github.com/USERNAME/GITHUB_PROJECT_NAME/issues"
+    "url": "https://github.com/matteozambon89/homebridge-seam/issues"
   },
   "keywords": [
     "homebridge-plugin"
@@ -42,6 +42,8 @@
     "typescript-eslint": "^8.12.2"
   },
   "dependencies": {
-    "homebridge-lib": "^7.1.0"
+    "homebridge-lib": "7.1.0",
+    "p-queue": "8.0.1",
+    "seam": "1.41.0"
   }
 }
