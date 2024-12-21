@@ -3,7 +3,6 @@
   "displayName": "Homebridge Seam",
   "type": "module",
   "version": "1.0.0",
-  "private": true,
   "description": "Homebridge plugin for SEAM",
   "author": "Matteo Zambon<matteo@yeeti.co>",
   "license": "Apache-2.0",
