@@ -6,10 +6,7 @@
     "pin": "031-45-154"
   },
   "description": "HomeBridge HTTP Status Control",
-  "plugins": [
-    "homebridge-plugin-name",
-    "homebridge-config-ui-x"
-  ],
+  "plugins": ["homebridge-seam", "homebridge-config-ui-x"],
   "platforms": [
     {
       "name": "Config",
@@ -23,8 +20,13 @@
       "debug": false
     },
     {
-      "name": "homebridge-plugin-name",
-      "platform": "ExampleHomebridgePlugin"
+      "name": "homebridge-seam",
+      "platform": "SeamPlatform",
+      "credentials": {
+        "apiKey": "...",
+        "workspaceId": "..."
+      },
+      "refreshRate": 60
     }
   ],
   "accessories": []
