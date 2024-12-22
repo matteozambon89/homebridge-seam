@@ -20,8 +20,8 @@
       "debug": false
     },
     {
-      "name": "homebridge-seam",
-      "platform": "SeamPlatform",
+      "name": "SEAM",
+      "platform": "HomebridgeSEAM",
       "credentials": {
         "apiKey": "...",
         "workspaceId": "..."
